@@ -363,7 +363,7 @@ used = today_usage(user["id"])
 
 plan = PLANS.get(user["plan"], PLANS["free"])
 used = today_usage(user["id"])
-    message = ""
+message = ""
 
     if request.method == "POST":
         market = request.form["market"].upper().strip()
