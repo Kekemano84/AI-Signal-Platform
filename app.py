@@ -1,7 +1,9 @@
-import os, sqlite3, requests
+import os
+import sqlite3
+import requests
 from datetime import datetime
 from functools import wraps
-from flask import Flask, request, redirect, session, render_template_string, url_for, flash
+from flask import Flask, request, redirect, session, render_template_string, flash
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
@@ -12,8 +14,8 @@ ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "your@email.com").lower()
 
 PLANS = {
     "free": {"name": "Free", "daily_limit": 1},
-    "basic": {"name": "Basic", "daily_limit": 5},
-    "pro": {"name": "Pro", "daily_limit": 20},
+    "basic": {"name": "Basic", "daily_limit": 10},
+    "pro": {"name": "Pro", "daily_limit": 50},
     "lifetime": {"name": "Lifetime", "daily_limit": 999},
 }
 
@@ -24,19 +26,19 @@ BASE_HTML = """
 <title>AI Crypto Signal App</title>
 <style>
 body{font-family:Arial;background:#07111f;color:white;margin:0}
-nav{background:#0d1b2f;padding:15px;display:flex;gap:15px}
+nav{background:#0d1b2f;padding:15px;display:flex;gap:18px}
 a{color:#4dd4ff;text-decoration:none}
-.container{max-width:1000px;margin:30px auto;padding:20px}
-.card{background:#101d33;padding:20px;border-radius:12px;margin-bottom:20px}
-input,select,button{padding:12px;margin:6px 0;width:100%;border-radius:8px;border:0}
+.container{max-width:1000px;margin:40px auto;padding:20px}
+.card{background:#101d33;padding:25px;border-radius:12px;margin-bottom:25px}
+input,select,button{padding:14px;margin:8px 0;width:100%;border-radius:8px;border:0}
 button{background:#16c784;color:white;font-weight:bold;cursor:pointer}
-.danger{background:#ff4d4d}
 .signal-long{color:#16c784;font-weight:bold}
 .signal-short{color:#ff4d4d;font-weight:bold}
 .signal-hold{color:#ffd166;font-weight:bold}
 .small{color:#aaa;font-size:13px}
 table{width:100%;border-collapse:collapse}
 td,th{padding:10px;border-bottom:1px solid #26354f}
+pre{white-space:pre-wrap;font-family:Arial}
 </style>
 </head>
 <body>
@@ -131,20 +133,26 @@ def get_binance_prices(symbol="BTCUSDT", interval="1h", limit=100):
     url = "https://api.binance.com/api/v3/klines"
     params = {"symbol": symbol.upper(), "interval": interval, "limit": limit}
     r = requests.get(url, params=params, timeout=10)
+    r.raise_for_status()
     data = r.json()
     return [float(candle[4]) for candle in data]
 
-
 def ema(values, period):
+    if len(values) < period:
+        return values[-1]
     k = 2 / (period + 1)
-    ema_values = [values[0]]
+    ema_value = values[0]
     for price in values[1:]:
-        ema_values.append(price * k + ema_values[-1] * (1 - k))
-    return ema_values[-1]
-
+        ema_value = price * k + ema_value * (1 - k)
+    return ema_value
 
 def rsi(values, period=14):
-    gains, losses = [], []
+    if len(values) < period + 1:
+        return 50
+
+    gains = []
+    losses = []
+
     for i in range(1, len(values)):
         diff = values[i] - values[i - 1]
         gains.append(max(diff, 0))
@@ -159,15 +167,11 @@ def rsi(values, period=14):
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
 
-
 def macd(values):
-    ema12 = ema(values, 12)
-    ema26 = ema(values, 26)
-    return ema12 - ema26
-
+    return ema(values, 12) - ema(values, 26)
 
 def generate_ai_signal(market):
-    symbol = market.upper()
+    symbol = market.upper().strip().replace("/", "").replace("-", "")
 
     if not symbol.endswith("USDT"):
         symbol = symbol + "USDT"
@@ -242,6 +246,7 @@ This is not financial advice. Always use your own risk management."""
     except Exception as e:
         signal = "HOLD"
         confidence = 50
+
         analysis = f"""Market: {symbol}
 
 Signal: HOLD
@@ -249,32 +254,15 @@ Confidence: 50%
 
 AI Analysis:
 Could not fetch live Binance market data.
+Please check the symbol. Example: BTC, ETH, SOL, BNB.
 
 Error:
 {str(e)}
 
 Risk note:
 This is not financial advice."""
+
         return signal, confidence, analysis
-
-    if signal == "LONG":
-        reason = "Momentum looks positive, market structure is improving, and risk appetite appears stronger."
-    elif signal == "SHORT":
-        reason = "Market weakness is visible, downside pressure is present, and volatility risk is elevated."
-    else:
-        reason = "The market is unclear, price action is mixed, and waiting for confirmation is safer."
-
-    return signal, confidence, f"""
-Market: {market.upper()}
-Signal: {signal}
-Confidence: {confidence}%
-
-AI Analysis:
-{reason}
-
-Risk note:
-This is not financial advice. Always use your own risk management.
-"""
 
 def send_discord(webhook, text):
     if not webhook:
@@ -362,7 +350,7 @@ def logout():
 @login_required
 def dashboard():
     user = current_user()
-    plan = PLANS[user["plan"]]
+    plan = PLANS.get(user["plan"], PLANS["free"])
     used = today_usage(user["id"])
     message = ""
 
@@ -385,9 +373,16 @@ def dashboard():
 
 {analysis}
 """
+
         sent = send_discord(user["discord_webhook"], discord_text)
 
-        message = f"<div class='card'><h3>New Signal Generated</h3><pre>{analysis}</pre><p>Discord sent: {'Yes' if sent else 'No / webhook missing'}</p></div>"
+        message = f"""
+        <div class='card'>
+        <h3>New Signal Generated</h3>
+        <pre>{analysis}</pre>
+        <p>Discord sent: {'Yes' if sent else 'No / webhook missing'}</p>
+        </div>
+        """
 
     with db() as conn:
         signals = conn.execute(
@@ -418,7 +413,7 @@ def dashboard():
     <div class="card">
     <h3>Generate Analysis</h3>
     <form method="post">
-    <input name="market" placeholder="BTC, ETH, SOL, TSLA, NVDA..." required>
+    <input name="market" placeholder="BTC, ETH, SOL, BNB..." required>
     <button>Generate Analysis</button>
     </form>
     </div>
@@ -446,31 +441,17 @@ def settings():
         flash("Settings saved.")
         return redirect("/settings")
 
+    webhook_value = user["discord_webhook"] or ""
+
     return render(f"""
     <div class="card">
     <h2>Settings</h2>
     <form method="post">
     <label>Your Discord Webhook URL</label>
-    <input name="discord_webhook" value="{user["discord_webhook"] or ""}" placeholder="https://discord.com/api/webhooks/...">
+    <input name="discord_webhook" value="{webhook_value}" placeholder="https://discord.com/api/webhooks/...">
     <button>Save</button>
     </form>
     <p class="small">Each user can use their own Discord webhook.</p>
-    </div>
-    """)
-
-@app.route("/pricing")
-@login_required
-def pricing():
-    return render("""
-    <div class="card">
-    <h2>Plans</h2>
-    <p>Stripe payment will be connected here later.</p>
-    <ul>
-    <li>Free - 1 analysis/day</li>
-    <li>Basic - 5 analyses/day</li>
-    <li>Pro - 20 analyses/day</li>
-    <li>Lifetime - unlimited style access</li>
-    </ul>
     </div>
     """)
 
@@ -538,7 +519,8 @@ def update_plan():
     flash("Plan updated.")
     return redirect("/admin")
 
+init_db()
+
 if __name__ == "__main__":
-    init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
