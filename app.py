@@ -350,8 +350,14 @@ def logout():
 @login_required
 def dashboard():
     user = current_user()
-    plan = PLANS.get(user["plan"], PLANS["free"])
-    used = today_usage(user["id"])
+
+if user is None:
+    session.clear()
+    flash("Session expired. Please login again.")
+    return redirect("/login")
+
+plan = PLANS.get(user["plan"], PLANS["free"])
+used = today_usage(user["id"])
     message = ""
 
     if request.method == "POST":
