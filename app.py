@@ -1,4 +1,4 @@
-import os, sqlite3, random, requests
+import os, sqlite3, requests
 from datetime import datetime
 from functools import wraps
 from flask import Flask, request, redirect, session, render_template_string, url_for, flash
