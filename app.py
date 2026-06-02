@@ -127,10 +127,135 @@ def today_usage(user_id):
         ).fetchone()
     return r["c"]
 
+def get_binance_prices(symbol="BTCUSDT", interval="1h", limit=100):
+    url = "https://api.binance.com/api/v3/klines"
+    params = {"symbol": symbol.upper(), "interval": interval, "limit": limit}
+    r = requests.get(url, params=params, timeout=10)
+    data = r.json()
+    return [float(candle[4]) for candle in data]
+
+
+def ema(values, period):
+    k = 2 / (period + 1)
+    ema_values = [values[0]]
+    for price in values[1:]:
+        ema_values.append(price * k + ema_values[-1] * (1 - k))
+    return ema_values[-1]
+
+
+def rsi(values, period=14):
+    gains, losses = [], []
+    for i in range(1, len(values)):
+        diff = values[i] - values[i - 1]
+        gains.append(max(diff, 0))
+        losses.append(abs(min(diff, 0)))
+
+    avg_gain = sum(gains[-period:]) / period
+    avg_loss = sum(losses[-period:]) / period
+
+    if avg_loss == 0:
+        return 100
+
+    rs = avg_gain / avg_loss
+    return 100 - (100 / (1 + rs))
+
+
+def macd(values):
+    ema12 = ema(values, 12)
+    ema26 = ema(values, 26)
+    return ema12 - ema26
+
+
 def generate_ai_signal(market):
-    signals = ["LONG", "SHORT", "HOLD"]
-    signal = random.choice(signals)
-    confidence = random.randint(55, 91)
+    symbol = market.upper()
+
+    if not symbol.endswith("USDT"):
+        symbol = symbol + "USDT"
+
+    try:
+        prices = get_binance_prices(symbol)
+        current_price = prices[-1]
+
+        rsi_value = round(rsi(prices), 2)
+        ema20 = round(ema(prices, 20), 4)
+        ema50 = round(ema(prices, 50), 4)
+        macd_value = round(macd(prices), 4)
+
+        score = 0
+        reasons = []
+
+        if rsi_value < 30:
+            score += 2
+            reasons.append("RSI is oversold, possible bounce zone.")
+        elif rsi_value > 70:
+            score -= 2
+            reasons.append("RSI is overbought, possible correction risk.")
+        else:
+            reasons.append("RSI is neutral.")
+
+        if current_price > ema20 > ema50:
+            score += 2
+            reasons.append("Price is above EMA20 and EMA50, trend looks bullish.")
+        elif current_price < ema20 < ema50:
+            score -= 2
+            reasons.append("Price is below EMA20 and EMA50, trend looks bearish.")
+        else:
+            reasons.append("EMA trend is mixed.")
+
+        if macd_value > 0:
+            score += 1
+            reasons.append("MACD is positive.")
+        else:
+            score -= 1
+            reasons.append("MACD is negative.")
+
+        if score >= 2:
+            signal = "LONG"
+            confidence = min(90, 65 + score * 5)
+        elif score <= -2:
+            signal = "SHORT"
+            confidence = min(90, 65 + abs(score) * 5)
+        else:
+            signal = "HOLD"
+            confidence = 60
+
+        analysis = f"""Market: {symbol}
+Current price: {current_price}
+
+Signal: {signal}
+Confidence: {confidence}%
+
+Indicators:
+RSI: {rsi_value}
+EMA20: {ema20}
+EMA50: {ema50}
+MACD: {macd_value}
+
+AI Analysis:
+{chr(10).join(reasons)}
+
+Risk note:
+This is not financial advice. Always use your own risk management."""
+
+        return signal, confidence, analysis
+
+    except Exception as e:
+        signal = "HOLD"
+        confidence = 50
+        analysis = f"""Market: {symbol}
+
+Signal: HOLD
+Confidence: 50%
+
+AI Analysis:
+Could not fetch live Binance market data.
+
+Error:
+{str(e)}
+
+Risk note:
+This is not financial advice."""
+        return signal, confidence, analysis
 
     if signal == "LONG":
         reason = "Momentum looks positive, market structure is improving, and risk appetite appears stronger."
