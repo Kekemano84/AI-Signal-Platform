@@ -351,10 +351,15 @@ def logout():
 def dashboard():
     user = current_user()
 
+user = current_user()
+
 if user is None:
     session.clear()
     flash("Session expired. Please login again.")
     return redirect("/login")
+
+plan = PLANS.get(user["plan"], PLANS["free"])
+used = today_usage(user["id"])
 
 plan = PLANS.get(user["plan"], PLANS["free"])
 used = today_usage(user["id"])
