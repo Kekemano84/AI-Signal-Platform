@@ -140,10 +140,13 @@ def get_binance_prices(symbol="BTCUSDT", interval="1h", limit=100):
 def ema(values, period):
     if len(values) < period:
         return values[-1]
+
     k = 2 / (period + 1)
     ema_value = values[0]
+
     for price in values[1:]:
         ema_value = price * k + ema_value * (1 - k)
+
     return ema_value
 
 def rsi(values, period=14):
@@ -267,6 +270,7 @@ This is not financial advice."""
 def send_discord(webhook, text):
     if not webhook:
         return False
+
     try:
         r = requests.post(webhook, json={"content": text}, timeout=10)
         return r.status_code in [200, 204]
@@ -297,8 +301,10 @@ def register():
                     "INSERT INTO users(email,password,is_admin,created_at) VALUES(?,?,?,?)",
                     (email, generate_password_hash(password), is_admin, datetime.now().isoformat())
                 )
+
             flash("Registration successful. Please login.")
             return redirect("/login")
+
         except sqlite3.IntegrityError:
             flash("Email already registered.")
 
@@ -351,19 +357,14 @@ def logout():
 def dashboard():
     user = current_user()
 
-user = current_user()
+    if user is None:
+        session.clear()
+        flash("Session expired. Please login again.")
+        return redirect("/login")
 
-if user is None:
-    session.clear()
-    flash("Session expired. Please login again.")
-    return redirect("/login")
-
-plan = PLANS.get(user["plan"], PLANS["free"])
-used = today_usage(user["id"])
-
-plan = PLANS.get(user["plan"], PLANS["free"])
-used = today_usage(user["id"])
-message = ""
+    plan = PLANS.get(user["plan"], PLANS["free"])
+    used = today_usage(user["id"])
+    message = ""
 
     if request.method == "POST":
         market = request.form["market"].upper().strip()
@@ -377,7 +378,14 @@ message = ""
         with db() as conn:
             conn.execute(
                 "INSERT INTO signals(user_id,market,signal,confidence,analysis,created_at) VALUES(?,?,?,?,?,?)",
-                (user["id"], market, signal, confidence, analysis, datetime.now().isoformat())
+                (
+                    user["id"],
+                    market,
+                    signal,
+                    confidence,
+                    analysis,
+                    datetime.now().isoformat()
+                )
             )
 
         discord_text = f"""📊 AI Signal
@@ -395,6 +403,8 @@ message = ""
         </div>
         """
 
+        used = today_usage(user["id"])
+
     with db() as conn:
         signals = conn.execute(
             "SELECT * FROM signals WHERE user_id=? ORDER BY id DESC LIMIT 20",
@@ -402,8 +412,16 @@ message = ""
         ).fetchall()
 
     rows = ""
+
     for s in signals:
-        cls = "signal-long" if s["signal"] == "LONG" else "signal-short" if s["signal"] == "SHORT" else "signal-hold"
+        cls = (
+            "signal-long"
+            if s["signal"] == "LONG"
+            else "signal-short"
+            if s["signal"] == "SHORT"
+            else "signal-hold"
+        )
+
         rows += f"""
         <tr>
         <td>{s["created_at"][:19]}</td>
@@ -434,7 +452,12 @@ message = ""
     <div class="card">
     <h3>Signal History</h3>
     <table>
-    <tr><th>Date</th><th>Market</th><th>Signal</th><th>Confidence</th></tr>
+    <tr>
+        <th>Date</th>
+        <th>Market</th>
+        <th>Signal</th>
+        <th>Confidence</th>
+    </tr>
     {rows}
     </table>
     </div>
@@ -445,10 +468,20 @@ message = ""
 def settings():
     user = current_user()
 
+    if user is None:
+        session.clear()
+        flash("Session expired. Please login again.")
+        return redirect("/login")
+
     if request.method == "POST":
         webhook = request.form.get("discord_webhook", "").strip()
+
         with db() as conn:
-            conn.execute("UPDATE users SET discord_webhook=? WHERE id=?", (webhook, user["id"]))
+            conn.execute(
+                "UPDATE users SET discord_webhook=? WHERE id=?",
+                (webhook, user["id"])
+            )
+
         flash("Settings saved.")
         return redirect("/settings")
 
@@ -475,16 +508,17 @@ def admin():
         total_signals = conn.execute("SELECT COUNT(*) c FROM signals").fetchone()["c"]
 
     rows = ""
+
     for u in users:
         rows += f"""
         <tr>
-        <td>{u["id"]}</td>
-        <td>{u["email"]}</td>
-        <td>{u["plan"]}</td>
-        <td>{u["created_at"][:19]}</td>
+        <td>{u['id']}</td>
+        <td>{u['email']}</td>
+        <td>{u['plan']}</td>
+        <td>{u['created_at'][:19]}</td>
         <td>
         <form method="post" action="/admin/update-plan">
-        <input type="hidden" name="user_id" value="{u["id"]}">
+        <input type="hidden" name="user_id" value="{u['id']}">
         <select name="plan">
         <option value="free">Free</option>
         <option value="basic">Basic</option>
@@ -507,7 +541,13 @@ def admin():
     <div class="card">
     <h3>Users</h3>
     <table>
-    <tr><th>ID</th><th>Email</th><th>Plan</th><th>Created</th><th>Change Plan</th></tr>
+    <tr>
+        <th>ID</th>
+        <th>Email</th>
+        <th>Plan</th>
+        <th>Created</th>
+        <th>Change Plan</th>
+    </tr>
     {rows}
     </table>
     </div>
