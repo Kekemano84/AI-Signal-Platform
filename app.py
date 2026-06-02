@@ -381,7 +381,10 @@ def dashboard():
                 (user["id"], market, signal, confidence, analysis, datetime.now().isoformat())
             )
 
-        discord_text = f"📊 AI Signal\\nMarket: {market}\\nSignal: {signal}\\nConfidence: {confidence}%\\n\\n{analysis}"
+        discord_text = f"""📊 AI Signal
+
+{analysis}
+"""
         sent = send_discord(user["discord_webhook"], discord_text)
 
         message = f"<div class='card'><h3>New Signal Generated</h3><pre>{analysis}</pre><p>Discord sent: {'Yes' if sent else 'No / webhook missing'}</p></div>"
